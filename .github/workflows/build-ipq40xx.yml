@@ -144,6 +144,10 @@ jobs:
           else
             echo "✓ 请求的包全部存在于 ${SOURCE_BRANCH}"
           fi
+          echo "=== 代理后端选择情况（应只有 sing-box）==="
+          for p in sing-box shadowsocks-rust smartdns xray-core haproxy simple-obfs v2ray-plugin; do
+            echo "  ${p}: $(grep -E "^(# )?CONFIG_PACKAGE_${p}=" .config | head -1 || echo '未出现')"
+          done
 
       - name: Build firmware
         working-directory: immortalwrt
