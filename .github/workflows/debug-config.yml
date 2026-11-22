@@ -28,9 +28,6 @@ jobs:
       - name: Clone ImmortalWrt source
         run: |
           git clone https://github.com/immortalwrt/immortalwrt -b openwrt-25.12 immortalwrt
-          cp "devices/${{ inputs.device }}/config" immortalwrt/.config
-          echo "=== 复制后的 .config 关键行 ==="
-          grep -E "CONFIG_PACKAGE_(jq|luci-compat|sing-box|kmod-ipv6)=y" immortalwrt/.config || echo "  (无)"
 
       - name: Add Passwall feeds
         working-directory: immortalwrt
@@ -47,26 +44,33 @@ jobs:
       - name: Feeds update and install
         working-directory: immortalwrt
         run: |
-          ./scripts/feeds update -a 2>&1 | tail -20
-          ./scripts/feeds install -a 2>&1 | tail -10
-          echo "=== feeds.conf.default ==="
-          cat feeds.conf.default
-          echo "=== package/feeds 下已链接的 feed ==="
-          ls package/feeds/ || true
-          echo "=== 关键包在 package 树中的位置 ==="
-          for p in jq luci-compat sing-box luci-app-passwall coreutils-timeout kmod-ipv6 cpufrequtils; do
-            hit=$(find package -maxdepth 3 -name "$p" -type d 2>/dev/null | head -3 | tr '\n' ' ')
-            echo "  $p -> ${hit:-MISSING}"
-          done
+          ./scripts/feeds update -a >/dev/null 2>&1
+          ./scripts/feeds install -a >/dev/null 2>&1
+          echo "feeds 链接: $(ls package/feeds/ | tr '\n' ' ')"
+          echo "jq 目录: $(ls -d package/feeds/packages/utils/jq 2>/dev/null || echo 缺失)"
+          echo "luci-compat 目录: $(ls -d package/feeds/luci/collections/luci-compat 2>/dev/null || echo 缺失)"
 
-      - name: Defconfig and inspect
+      - name: A defconfig with config copied after feeds
         working-directory: immortalwrt
         run: |
-          make defconfig 2>&1 | grep -vE "recursive dependency|kconfig-language|^$" | tail -15
-          echo "=== defconfig 后关键符号 ==="
-          for s in jq luci-compat sing-box luci-app-passwall coreutils-timeout kmod-ipv6 cpufrequtils luci-theme-kucat; do
-            line=$(grep -E "^(# )?CONFIG_PACKAGE_${s}(=y|=m| is not set)" .config | head -1)
-            echo "  ${s}: ${line:-NOT-IN-CONFIG}"
+          cp "$GITHUB_WORKSPACE/devices/${{ inputs.device }}/config" .config
+          echo "复制后 CONFIG_PACKAGE_*=y 数量: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
+          make defconfig > /tmp/defconfig.log 2>&1 || true
+          echo "defconfig 退出码: $?"
+          echo "--- defconfig 输出末尾 40 行 ---"
+          tail -40 /tmp/defconfig.log
+          echo "--- 关键符号 ---"
+          for s in jq luci-compat sing-box luci-app-passwall coreutils-timeout libjq luci-theme-kucat; do
+            echo "  ${s}: $(grep -E "^(# )?CONFIG_PACKAGE_${s}(=y|=m| is not set)" .config | head -1)"
           done
-          echo "=== CONFIG_PACKAGE_*=y 总数 ==="
-          grep -c '^CONFIG_PACKAGE_.*=y' .config
+          echo "defconfig 后 CONFIG_PACKAGE_*=y 数量: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
+
+      - name: B second defconfig pass
+        working-directory: immortalwrt
+        run: |
+          make defconfig > /tmp/defconfig2.log 2>&1 || true
+          echo "--- 第二次 defconfig 后关键符号 ---"
+          for s in jq luci-compat sing-box luci-app-passwall; do
+            echo "  ${s}: $(grep -E "^(# )?CONFIG_PACKAGE_${s}(=y|=m| is not set)" .config | head -1)"
+          done
+          echo "总数: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
