@@ -1,0 +1,178 @@
+name: Build Amlogic (N1)
+
+# N1 系列：编译 armsr/armv8 rootfs → 可选注入 Mihomo/GEO → openwrt_packit 打成 .img.xz
+on:
+  workflow_dispatch:
+    inputs:
+      inject_mihomo:
+        description: "注入 Mihomo Alpha 内核 + GEOIP/GEOSITE"
+        type: boolean
+        default: true
+      upload_rootfs:
+        description: "Release 附带 rootfs.tar.gz（救砖/定制用）"
+        type: boolean
+        default: true
+      ssh_debug:
+        description: "开启 SSH 调试（会挂起 job，仅排障时打开）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# 同一设备串行，避免两分钟内两次构建抢同名 tag
+concurrency:
+  group: build-amlogic
+  cancel-in-progress: false
+
+env:
+  TZ: Asia/Shanghai
+  DEVICE_DIR: devices/n1
+  TAG_PREFIX: N1
+  SOURCE_REPO: https://github.com/immortalwrt/immortalwrt
+  SOURCE_BRANCH: openwrt-25.12
+  # openwrt_packit 的套件清单（24.10/25.12 通用；如需替换只改这里）
+  DEP_LIST: https://raw.githubusercontent.com/nantayo/My-Pkg/master/2410
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free up space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Initialize environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get -qq update > /dev/null
+          sudo -E apt-get -qq install -y $(curl -fsSL "$DEP_LIST") > /dev/null
+          sudo -E apt-get -qq install -y libncurses-dev > /dev/null
+          sudo -E apt-get -qq autoremove --purge > /dev/null
+          sudo -E apt-get -qq clean > /dev/null
+          sudo timedatectl set-timezone "$TZ"
+          sudo mkdir -p /workdir
+          sudo chown "$USER:$GROUPS" /workdir
+
+      - name: Clone source code
+        working-directory: /workdir
+        run: |
+          git clone "$SOURCE_REPO" -b "$SOURCE_BRANCH" --single-branch --depth=1 openwrt
+          ln -sf /workdir/openwrt "$GITHUB_WORKSPACE/openwrt"
+
+      # feeds / 主题 / files / .config 全部由设备目录提供
+      - name: Apply device config
+        run: |
+          chmod +x "$DEVICE_DIR/scripts/diy.sh"
+          cd openwrt
+          ./scripts/feeds update -a
+          "$GITHUB_WORKSPACE/$DEVICE_DIR/scripts/diy.sh"
+          ./scripts/feeds update -a
+          (
+            cd package
+            git clone --depth=1 https://github.com/sirpdboy/luci-theme-kucat
+            git clone --depth=1 https://github.com/sirpdboy/luci-app-kucat-config
+          )
+          ./scripts/feeds install -a
+          cd "$GITHUB_WORKSPACE"
+          rm -rf openwrt/files
+          cp -a "$DEVICE_DIR/files" openwrt/files
+          cp "$DEVICE_DIR/config" openwrt/.config
+          # 备份为 .config.old，防止 make download 触发 menuconfig
+          cp openwrt/.config openwrt/.config.old
+
+      - name: SSH connect to Actions
+        if: inputs.ssh_debug
+        uses: P3TERX/ssh2actions@main
+
+      - name: Download package
+        working-directory: ./openwrt
+        env:
+          CONFIG_SKIP: "y"
+        run: |
+          make defconfig
+          make download -j$(($(nproc) * 2))
+          find dl -type f -size -1k -delete
+
+      - name: Compile firmware
+        run: |
+          chmod -R 755 openwrt
+          cd openwrt
+          echo "Use 2 threads for stable build"
+          make -j2 --quiet
+
+      - name: Verify build output
+        run: |
+          ROOTFS=$(ls -1 openwrt/bin/targets/armsr/armv8/*rootfs.tar.gz 2>/dev/null | head -n 1)
+          if [ -z "$ROOTFS" ] || [ ! -f "$ROOTFS" ]; then
+            echo "❌ 编译失败：未生成 rootfs.tar.gz"
+            exit 1
+          fi
+          echo "✅ 编译成功：$(basename "$ROOTFS")"
+          ls -lh "$ROOTFS"
+
+      - name: Inject Mihomo + GEO
+        if: inputs.inject_mihomo
+        run: bash "$DEVICE_DIR/scripts/inject-mihomo.sh"
+
+      - name: Package armsr as openwrt
+        uses: unifreq/openwrt_packit@master
+        env:
+          OPENWRT_ARMVIRT: openwrt/bin/targets/armsr/armv8/*rootfs.tar.gz
+          KERNEL_REPO_URL: breakingbadboy/OpenWrt
+          KERNEL_VERSION_NAME: 6.6.y
+          PACKAGE_SOC: diy
+          GZIP_IMGS: .xz
+          SCRIPT_DIY_PATH: devices/n1/scripts/mk_s905d_n1.sh
+          WHOAMI: nantayo
+          SW_FLOWOFFLOAD: 0
+          SFE_FLOW: 0
+
+      - name: Collect release assets
+        run: |
+          {
+            echo "ASSETS<<__EOF__"
+            echo "$PACKAGED_OUTPUTPATH/*.img.xz"
+            if [ "${{ inputs.upload_rootfs }}" = "true" ]; then
+              echo "openwrt/bin/targets/armsr/armv8/*rootfs.tar.gz"
+            fi
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Generate tag
+        run: echo "TAG=${TAG_PREFIX}-$(date +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
+          files: ${{ env.ASSETS }}
+          body: |
+            **ImmortalWrt N1 专用固件（${{ env.SOURCE_BRANCH }}）**
+
+            IP: 192.168.2.5　账户: root　密码: password
+
+            📦 内置：OpenClash${{ inputs.inject_mihomo && ' + Mihomo Alpha 内核 + GEOIP/GEOSITE' || '' }}
+            🔄 OTA：Amlogic Service 已指向本仓库，只匹配 `_n1_` + `k6.6.` 的 `.img.xz`
+            🏗️ 构建时间: ${{ env.PACKAGED_OUTPUTDATE }}
+
+      # 只清理本设备的旧 release（默认分支的 tag 以 N1- 开头）
+      - name: Prune old N1 releases
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        with:
+          keep_latest: 2
+          delete_tags: true
+          delete_tag_pattern: "^N1-"

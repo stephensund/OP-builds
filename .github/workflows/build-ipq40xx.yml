@@ -1,0 +1,176 @@
+name: Build ipq40xx (ACRH17 / R619AC)
+
+# ipq40xx 系列：编译出 sysupgrade .bin，直接发布
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: "目标设备"
+        type: choice
+        options:
+          - ac42u
+          - r619ac
+        default: ac42u
+      lan_mode:
+        description: "LAN 角色"
+        type: choice
+        options:
+          - client-static
+          - main-router
+        default: client-static
+      lan_ip:
+        description: "LAN IP（留空用设备默认值）"
+        default: ""
+      lan_gateway:
+        description: "默认网关（留空用设备默认值）"
+        default: ""
+      lan_mask:
+        description: "子网掩码（留空用设备默认值）"
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-ipq40xx-${{ inputs.device }}
+  cancel-in-progress: false
+
+env:
+  TZ: Asia/Shanghai
+  SOURCE_REPO: https://github.com/immortalwrt/immortalwrt
+  SOURCE_BRANCH: openwrt-25.12
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential gcc g++ git python3 unzip \
+            zlib1g-dev libncurses5-dev gawk gettext jq
+
+      - name: Resolve device metadata
+        run: |
+          META="devices/${{ inputs.device }}/meta.json"
+          {
+            echo "TAG_PREFIX=$(jq -r .tag_prefix "$META")"
+            echo "CONFIG_FILE=$(jq -r .config "$META")"
+            echo "KEEP_RELEASES=$(jq -r .keep_releases "$META")"
+            echo "DEF_LAN_IP=$(jq -r .lan_ip "$META")"
+            echo "DEF_LAN_GW=$(jq -r .lan_gateway "$META")"
+            echo "DEF_LAN_MASK=$(jq -r .lan_mask "$META")"
+          } >> "$GITHUB_ENV"
+
+      - name: Resolve effective LAN settings
+        run: |
+          if [ -n "${{ inputs.lan_ip }}" ]; then IP="${{ inputs.lan_ip }}"; else IP="$DEF_LAN_IP"; fi
+          if [ -n "${{ inputs.lan_gateway }}" ]; then GW="${{ inputs.lan_gateway }}"; else GW="$DEF_LAN_GW"; fi
+          if [ -n "${{ inputs.lan_mask }}" ]; then MASK="${{ inputs.lan_mask }}"; else MASK="$DEF_LAN_MASK"; fi
+          {
+            echo "LAN_IP=$IP"
+            echo "LAN_GW=$GW"
+            echo "LAN_MASK=$MASK"
+          } >> "$GITHUB_ENV"
+
+      - name: Clone ImmortalWrt source
+        run: |
+          git clone "$SOURCE_REPO" -b "$SOURCE_BRANCH" immortalwrt
+          cp "$CONFIG_FILE" immortalwrt/.config
+
+      # Passwall 主仓库 + 依赖仓库
+      - name: Add Passwall feeds
+        working-directory: immortalwrt
+        run: |
+          echo "src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall.git" >> feeds.conf.default
+          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
+
+      - name: Clone KuCat theme
+        run: |
+          cd immortalwrt/package
+          git clone --depth=1 https://github.com/sirpdboy/luci-theme-kucat
+          git clone --depth=1 https://github.com/sirpdboy/luci-app-kucat-config
+
+      - name: Update & install feeds
+        working-directory: immortalwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      # LAN 配置来自设备目录的模板，输入参数只替换占位符
+      - name: Inject LAN config
+        working-directory: immortalwrt
+        run: |
+          mkdir -p files/etc/config
+          TPL="$GITHUB_WORKSPACE/devices/${{ inputs.device }}/network/${{ inputs.lan_mode }}.tmpl"
+          sed -e "s|@LAN_IP@|${LAN_IP}|g" \
+              -e "s|@LAN_GATEWAY@|${LAN_GW}|g" \
+              -e "s|@LAN_MASK@|${LAN_MASK}|g" \
+              "$TPL" > files/etc/config/network
+          echo "--- files/etc/config/network ---"
+          cat files/etc/config/network
+
+      # 换分支后 config 里不存在的符号会被 make defconfig 静默丢掉，这里显式列出来
+      - name: Render config & audit dropped packages
+        working-directory: immortalwrt
+        run: |
+          make defconfig >/dev/null
+          grep -oE '^CONFIG_PACKAGE_[A-Za-z0-9_.+-]+=y' "$GITHUB_WORKSPACE/${CONFIG_FILE}" | sort -u > /tmp/requested.txt || true
+          grep -oE '^CONFIG_PACKAGE_[A-Za-z0-9_.+-]+=y' .config | sort -u > /tmp/effective.txt || true
+          dropped="$(comm -23 /tmp/requested.txt /tmp/effective.txt | sed -e 's/^CONFIG_PACKAGE_//' -e 's/=y$//')"
+          if [ -n "${dropped}" ]; then
+            echo "⚠️ 以下请求的包在 ${SOURCE_BRANCH} 中不存在，已被 make defconfig 丢弃："
+            echo "${dropped}" | sed 's/^/  - /'
+          else
+            echo "✓ 请求的包全部存在于 ${SOURCE_BRANCH}"
+          fi
+
+      - name: Build firmware
+        working-directory: immortalwrt
+        run: |
+          make -j2 --quiet
+
+      - name: Collect firmware
+        run: |
+          mkdir -p immortalwrt/bin/output
+          find immortalwrt/bin/targets -type f -name "*.bin" -exec cp {} immortalwrt/bin/output/ \;
+          ls -lh immortalwrt/bin/output/
+
+      - name: Generate tag
+        run: |
+          if [ "${{ inputs.lan_mode }}" = "main-router" ]; then
+            PREFIX="${TAG_PREFIX}-MAIN"
+          else
+            PREFIX="${TAG_PREFIX}"
+          fi
+          # R619AC 普通版要排除 R619AC-MAIN-*，否则会误删主路由固件
+          if [ "${{ inputs.device }}" = "r619ac" ] && [ "${{ inputs.lan_mode }}" != "main-router" ]; then
+            PATTERN='^R619AC-(?!MAIN)'
+          else
+            PATTERN="^${PREFIX}-"
+          fi
+          echo "TAG=${PREFIX}-$(date +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
+          echo "PRUNE_PATTERN=${PATTERN}" >> "$GITHUB_ENV"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
+          files: immortalwrt/bin/output/*
+          body: |
+            **${{ inputs.device }} 固件（ImmortalWrt ${{ env.SOURCE_BRANCH }}）**
+
+            LAN IP: ${{ env.LAN_IP }}　网关: ${{ env.LAN_GW }}
+            root / password
+
+      - name: Prune old releases (this device only)
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        with:
+          keep_latest: ${{ env.KEEP_RELEASES }}
+          delete_tags: true
+          delete_tag_pattern: ${{ env.PRUNE_PATTERN }}

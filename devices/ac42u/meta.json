@@ -1,0 +1,17 @@
+{
+  "name": "ac42u",
+  "display": "ASUS RT-ACRH17 / RT-AC42U",
+  "family": "ipq40xx",
+  "runner": "ubuntu-22.04",
+  "source": {
+    "repo": "https://github.com/immortalwrt/immortalwrt",
+    "branch": "openwrt-25.12"
+  },
+  "config": "devices/ac42u/config",
+  "profile": "asus_rt-ac42u",
+  "tag_prefix": "ACRH17",
+  "keep_releases": 3,
+  "lan_ip": "192.168.2.11",
+  "lan_gateway": "192.168.2.1",
+  "lan_mask": "255.255.255.0"
+}

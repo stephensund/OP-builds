@@ -1,0 +1,23 @@
+{
+  "name": "n1",
+  "display": "Phicomm N1 (Amlogic S905D)",
+  "family": "amlogic",
+  "runner": "ubuntu-24.04",
+  "source": {
+    "repo": "https://github.com/immortalwrt/immortalwrt",
+    "branch": "openwrt-25.12"
+  },
+  "config": "devices/n1/config",
+  "files": "devices/n1/files",
+  "diy_script": "devices/n1/scripts/diy.sh",
+  "packit": {
+    "soc": "diy",
+    "script": "devices/n1/scripts/mk_s905d_n1.sh",
+    "kernel_repo": "breakingbadboy/OpenWrt",
+    "kernel_version": "6.6.y",
+    "whoami": "nantayo"
+  },
+  "tag_prefix": "N1",
+  "keep_releases": 2,
+  "lan_ip": "192.168.2.5"
+}

@@ -1,0 +1,10 @@
+openwrt/
+immortalwrt/
+*.img
+*.img.xz
+*.bin
+.config.old
+rootfs_work/
+mihomo_core/
+geo_files/
+.DS_Store

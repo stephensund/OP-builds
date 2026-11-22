@@ -1,0 +1,7 @@
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'static'
+	option ipaddr '@LAN_IP@'
+	option netmask '@LAN_MASK@'
+	option gateway '@LAN_GATEWAY@'
+	list dns '@LAN_GATEWAY@'

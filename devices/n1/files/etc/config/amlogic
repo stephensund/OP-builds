@@ -1,7 +1,9 @@
 config amlogic 'config'
 	option enable '1'
-	option amlogic_firmware_repo 'https://github.com/nantayo/N1-OpenWrt'
-	option amlogic_firmware_tag 'OpenWrt'
+	# OTA 仓库：只认 tag 含 "N1-" 的 release，且只挑文件名带 "_n1_" 与 "k6.6." 的 .img.xz
+	# （匹配规则见 luci-app-amlogic 的 amlogic_check_firmware.sh，合并仓库里其他机型的 .bin 不会命中）
+	option amlogic_firmware_repo 'https://github.com/stephensund/OP-builds'
+	option amlogic_firmware_tag 'N1-'
 	option amlogic_firmware_suffix '.img.xz'
 	option amlogic_kernel_path 'https://github.com/breakingbadboy/OpenWrt'
 	option amlogic_kernel_branch '6.6'

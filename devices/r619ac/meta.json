@@ -1,0 +1,17 @@
+{
+  "name": "r619ac",
+  "display": "P&W R619AC (p2w_r619ac_128m)",
+  "family": "ipq40xx",
+  "runner": "ubuntu-22.04",
+  "source": {
+    "repo": "https://github.com/immortalwrt/immortalwrt",
+    "branch": "openwrt-25.12"
+  },
+  "config": "devices/r619ac/config",
+  "profile": "p2w_r619ac_128m",
+  "tag_prefix": "R619AC",
+  "keep_releases": 3,
+  "lan_ip": "192.168.2.10",
+  "lan_gateway": "192.168.2.1",
+  "lan_mask": "255.255.255.0"
+}
