@@ -1,0 +1,72 @@
+name: Debug config (temp)
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: "设备"
+        type: choice
+        options:
+          - ac42u
+          - r619ac
+        default: ac42u
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential gcc g++ git python3 unzip zlib1g-dev libncurses5-dev gawk gettext jq
+
+      - name: Clone ImmortalWrt source
+        run: |
+          git clone https://github.com/immortalwrt/immortalwrt -b openwrt-25.12 immortalwrt
+          cp "devices/${{ inputs.device }}/config" immortalwrt/.config
+          echo "=== 复制后的 .config 关键行 ==="
+          grep -E "CONFIG_PACKAGE_(jq|luci-compat|sing-box|kmod-ipv6)=y" immortalwrt/.config || echo "  (无)"
+
+      - name: Add Passwall feeds
+        working-directory: immortalwrt
+        run: |
+          echo "src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall.git" >> feeds.conf.default
+          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
+
+      - name: Clone KuCat theme
+        run: |
+          cd immortalwrt/package
+          git clone --depth=1 https://github.com/sirpdboy/luci-theme-kucat
+          git clone --depth=1 https://github.com/sirpdboy/luci-app-kucat-config
+
+      - name: Feeds update and install
+        working-directory: immortalwrt
+        run: |
+          ./scripts/feeds update -a 2>&1 | tail -20
+          ./scripts/feeds install -a 2>&1 | tail -10
+          echo "=== feeds.conf.default ==="
+          cat feeds.conf.default
+          echo "=== package/feeds 下已链接的 feed ==="
+          ls package/feeds/ || true
+          echo "=== 关键包在 package 树中的位置 ==="
+          for p in jq luci-compat sing-box luci-app-passwall coreutils-timeout kmod-ipv6 cpufrequtils; do
+            hit=$(find package -maxdepth 3 -name "$p" -type d 2>/dev/null | head -3 | tr '\n' ' ')
+            echo "  $p -> ${hit:-MISSING}"
+          done
+
+      - name: Defconfig and inspect
+        working-directory: immortalwrt
+        run: |
+          make defconfig 2>&1 | grep -vE "recursive dependency|kconfig-language|^$" | tail -15
+          echo "=== defconfig 后关键符号 ==="
+          for s in jq luci-compat sing-box luci-app-passwall coreutils-timeout kmod-ipv6 cpufrequtils luci-theme-kucat; do
+            line=$(grep -E "^(# )?CONFIG_PACKAGE_${s}(=y|=m| is not set)" .config | head -1)
+            echo "  ${s}: ${line:-NOT-IN-CONFIG}"
+          done
+          echo "=== CONFIG_PACKAGE_*=y 总数 ==="
+          grep -c '^CONFIG_PACKAGE_.*=y' .config

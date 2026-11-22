@@ -174,3 +174,5 @@ jobs:
           keep_latest: ${{ env.KEEP_RELEASES }}
           delete_tags: true
           delete_tag_pattern: ${{ env.PRUNE_PATTERN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

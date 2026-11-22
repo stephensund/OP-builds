@@ -176,3 +176,5 @@ jobs:
           keep_latest: 2
           delete_tags: true
           delete_tag_pattern: "^N1-"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
