@@ -16,7 +16,6 @@ CONFIG_PACKAGE_luci-app-firewall=y
 # ===============================
 # IPv6 (WAN DHCPv6 client + LAN RA/DHCPv6 server + LuCI support)
 # ===============================
-CONFIG_PACKAGE_kmod-ipv6=y
 CONFIG_PACKAGE_odhcp6c=y
 CONFIG_PACKAGE_odhcpd-ipv6only=y
 CONFIG_PACKAGE_luci-proto-ipv6=y
@@ -27,9 +26,10 @@ CONFIG_PACKAGE_ip6tables-nft=y
 # ===============================
 # CPU frequency scaling
 # ===============================
-CONFIG_PACKAGE_kmod-cpufreq=y
-CONFIG_PACKAGE_kmod-qcom-cpufreq=y
-CONFIG_PACKAGE_cpufrequtils=y
+# 25.12/24.10 里没有 kmod-cpufreq / kmod-cpufreq-ipq40xx / kmod-qcom-cpufreq / cpufrequtils
+# 这几个符号（主仓库与全部默认 feed 均无定义），功能由 emortal 的 cpufreq 包提供：
+# luci-app-cpufreq(DEPENDS +cpufreq)，且 ipq40xx 的 DEFAULT_PACKAGES 已默认包含
+CONFIG_PACKAGE_luci-app-cpufreq=y
 
 # ===============================
 # Passwall

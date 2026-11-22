@@ -16,7 +16,19 @@ grep -c '^CONFIG_PACKAGE_.*=y' devices/<d>/config   # 期望值
 grep -c '^CONFIG_PACKAGE_.*=y' openwrt/.config      # make defconfig 之后
 ```
 
-从 24.10 升到 25.12 时，ipq40xx 的内核由 6.6 变为 6.12，`kmod-cpufreq-ipq40xx` 这类带 SoC 后缀的模块最容易消失——被丢弃不等于构建失败，但会少功能，务必看审计日志。
+被丢弃不等于构建失败，但会少功能，务必看审计日志。
+
+已核对（2026-11-22，逐目录搜源码，不只是看日志）：
+
+| 符号 | immortalwrt 主仓库 24.10 | 主仓库 25.12 | packages feed 25.12 | 结论 |
+|---|---|---|---|---|
+| `kmod-ipv6` | 无 `KernelPackage/ipv6` | 无 | — | 从来不存在，IPv6 不是模块 |
+| `kmod-cpufreq` | 无 | 无 | — | 从来不存在 |
+| `kmod-cpufreq-ipq40xx` | 无 | 无 | — | 从来不存在 |
+| `kmod-qcom-cpufreq` | 无 | 无 | — | 从来不存在 |
+| `cpufrequtils` | — | — | 无（immortalwrt/packages 与上游 openwrt/packages 全树都没有） | 已从 25.12 生态移除 |
+
+所以这几行属于长期死配置（24.10 时也在被静默丢弃），不是换分支才坏的。cpufreq 功能实际由 `package/emortal/cpufreq`（仅 arm/aarch64）+ `luci-app-cpufreq`（`DEPENDS:=+cpufreq`）提供，而 ipq40xx 的 `DEFAULT_PACKAGES` 本来就带 `luci-app-cpufreq`，因此删掉这些行不掉功能。
 
 ## 2. 重新生成某设备的 .config
 
