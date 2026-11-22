@@ -80,7 +80,8 @@ jobs:
       - name: Clone ImmortalWrt source
         run: |
           git clone "$SOURCE_REPO" -b "$SOURCE_BRANCH" immortalwrt
-          cp "$CONFIG_FILE" immortalwrt/.config
+          # 注意：.config 必须等 feeds 装完再复制，否则 feeds install 期间的 kconfig
+          # 解析会把还没注册的 feed 包符号静默丢弃（实测 34 个包只剩十几个）
 
       # Passwall 主仓库 + 依赖仓库
       - name: Add Passwall feeds
@@ -114,10 +115,12 @@ jobs:
           echo "--- files/etc/config/network ---"
           cat files/etc/config/network
 
-      # 换分支后 config 里不存在的符号会被 make defconfig 静默丢掉，这里显式列出来
-      - name: Render config & audit dropped packages
+      # feeds 装完后才复制 .config，然后 defconfig 并核对有没有包被静默丢弃
+      - name: Apply config & audit dropped packages
         working-directory: immortalwrt
         run: |
+          cp "$GITHUB_WORKSPACE/${CONFIG_FILE}" .config
+          echo "复制后 CONFIG_PACKAGE_*=y 数量: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
           make defconfig >/dev/null
           grep -oE '^CONFIG_PACKAGE_[A-Za-z0-9_.+-]+=y' "$GITHUB_WORKSPACE/${CONFIG_FILE}" | sort -u > /tmp/requested.txt || true
           grep -oE '^CONFIG_PACKAGE_[A-Za-z0-9_.+-]+=y' .config | sort -u > /tmp/effective.txt || true
