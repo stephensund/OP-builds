@@ -1,0 +1,108 @@
+name: Build ImmortalWrt for ACRH17 (AC42U Target)
+
+on:
+  workflow_dispatch:
+    inputs:
+      LAN_IP:
+        description: "LAN IP address"
+        required: true
+        default: "192.168.2.11"
+      LAN_GATEWAY:
+        description: "Default gateway"
+        required: true
+        default: "192.168.2.1"
+      LAN_MASK:
+        description: "Subnet mask"
+        required: true
+        default: "255.255.255.0"
+
+permissions:
+  contents: write
+
+env:
+  REPO_URL: https://github.com/immortalwrt/immortalwrt.git
+  REPO_BRANCH: openwrt-24.10
+  CONFIG_FILE: .config
+  TAG_PREFIX: ACRH17
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install build dependencies
+      run: |
+        sudo apt update -qq
+        sudo apt install -y build-essential gcc g++ git python3 unzip \
+          zlib1g-dev libncurses5-dev gawk gettext
+
+    - name: Clone ImmortalWrt
+      run: |
+        git clone ${REPO_URL} -b ${REPO_BRANCH} immortalwrt
+        cp ${CONFIG_FILE} immortalwrt/.config
+
+    # ✅ Passwall 主仓库 + 依赖仓库
+    - name: Add Passwall feeds
+      working-directory: immortalwrt
+      run: |
+        echo "src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall.git" >> feeds.conf.default
+        echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
+
+    # 皮肤（不影响 Passwall）
+    - name: Clone KuCat theme
+      run: |
+        cd immortalwrt/package
+        git clone https://github.com/sirpdboy/luci-theme-kucat
+        git clone https://github.com/sirpdboy/luci-app-kucat-config
+
+    - name: Update & install feeds
+      working-directory: immortalwrt
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    # ✅ LAN 设置（最高优先级，不会被覆盖）
+    - name: Inject LAN config
+      working-directory: immortalwrt
+      run: |
+        mkdir -p files/etc/config
+        cat > files/etc/config/network <<EOF
+        config interface 'lan'
+            option device 'br-lan'
+            option proto 'static'
+            option ipaddr '${{ github.event.inputs.LAN_IP }}'
+            option netmask '${{ github.event.inputs.LAN_MASK }}'
+            option gateway '${{ github.event.inputs.LAN_GATEWAY }}'
+            list dns '${{ github.event.inputs.LAN_GATEWAY }}'
+        EOF
+
+    - name: Build firmware
+      working-directory: immortalwrt
+      run: |
+        make defconfig
+        make -j2 --quiet
+
+    - name: Collect firmware
+      working-directory: immortalwrt/bin
+      run: |
+        mkdir -p output
+        find . -name "*.bin" -exec cp {} output/ \;
+
+    # ✅ 统一且唯一正确的 Tag 生成方式
+    - name: Generate release tag
+      run: |
+        TAG=${TAG_PREFIX}-$(date +'%Y%m%d-%H%M')
+        echo "TAG=$TAG" >> $GITHUB_ENV
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ env.TAG }}
+        name: ${{ env.TAG }}
+        files: immortalwrt/bin/output/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
