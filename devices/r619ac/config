@@ -35,8 +35,20 @@ CONFIG_PACKAGE_luci-app-cpufreq=y
 # Passwall
 # ===============================
 CONFIG_PACKAGE_luci-app-passwall=y
-CONFIG_PACKAGE_luci-app-passwall_INCLUDE_singbox=y
 CONFIG_PACKAGE_sing-box=y
+# passwall 的 INCLUDE 开关区分大小写，写错（如 INCLUDE_singbox）会被静默忽略并回落到 default
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
+# 关掉 rust 系组件：它们会拉起 rust/host 编译器（数小时且在本 runner 上必失败）；SS 由 sing-box 提供
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Shadowsocks_Rust_Client=n
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Shadowsocks_Rust_Server=n
+# 下面几个 INCLUDE 默认是 y，不显式关掉会把已禁用的包重新拉回来
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Haproxy=n
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray=n
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=n
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_V2ray_Plugin=n
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_V2ray_Geodata=n
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_V2ray_Geoview=n
+CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Shadow_TLS=n
 
 # ===============================
 # Passwall firewall deps

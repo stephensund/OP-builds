@@ -48,6 +48,18 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # 25.12 全量构建（toolchain + llvm-bpf）远超 runner 默认可用磁盘，先腾空间
+      - name: Free up space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
@@ -121,6 +133,7 @@ jobs:
         run: |
           cp "$GITHUB_WORKSPACE/${CONFIG_FILE}" .config
           echo "复制后 CONFIG_PACKAGE_*=y 数量: $(grep -c '^CONFIG_PACKAGE_.*=y' .config)"
+          df -h / /home/runner || true
           make defconfig >/dev/null
           grep -oE '^CONFIG_PACKAGE_[A-Za-z0-9_.+-]+=y' "$GITHUB_WORKSPACE/${CONFIG_FILE}" | sort -u > /tmp/requested.txt || true
           grep -oE '^CONFIG_PACKAGE_[A-Za-z0-9_.+-]+=y' .config | sort -u > /tmp/effective.txt || true
